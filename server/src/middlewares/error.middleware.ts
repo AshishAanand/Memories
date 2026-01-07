@@ -1,20 +1,49 @@
 import type { Request, Response, NextFunction } from 'express'
 
+interface CustomError extends Error {
+  code?: number
+  keyValue?: Record<string, unknown>
+  errors?: Record<string, { message: string }>
+  statusCode?: number
+}
+
 export function errorHandler(
-  err: Error,
+  err: CustomError,
   _req: Request,
   res: Response,
   _next: NextFunction
 ) {
-  console.error(err.stack);
+  console.error('Error:', err.message)
 
-  const statusCode = (err as any).statusCode || 500
-  const message = err.message || 'Internal Server Error'
+  let message = err.message || 'Internal Server Error'
+  let statusCode = err.statusCode || 500
 
-  // Send a constant response structure to the client
+  // Mongoose: Invalid ObjectId
+  if (err.name === 'CastError') {
+    message = 'Invalid resource ID'
+    statusCode = 400
+  }
+
+  // Mongoose: Duplicate key error
+  if (err.code === 11000) {
+    const fields = Object.keys(err.keyValue || {}).join(', ')
+    message = `Duplicate field value: ${fields}`
+    statusCode = 400
+  }
+
+  // Mongoose: Validation error
+  if (err.name === 'ValidationError') {
+    message = Object.values(err.errors || {})
+      .map((e: any) => e.message)
+      .join(', ')
+    statusCode = 400
+  }
+
   res.status(statusCode).json({
-    status: 'error',
-    statusCode: statusCode,
-    message: message,
-  });
-};
+    success: false,
+    error: message,
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+  })
+
+  _next()
+}
